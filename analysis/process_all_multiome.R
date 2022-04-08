@@ -24,7 +24,7 @@ for (f in file_list)
 
 base_path<-paste0('/data-2/',f,'epigenomics.sdsc.edu/hjiao/bot_output/Neil_Chi_152161/counts/',f,'outs/')
 
-counts <- Read10X_h5(paste0(base_path,f,paste0(base_path,"filtered_feature_bc_matrix.h5")
+counts <- Read10X_h5(paste0(base_path,f,"filtered_feature_bc_matrix.h5"))
 
 fragpath <- paste0(base_path,"atac_fragments.tsv.gz")
 
