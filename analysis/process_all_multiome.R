@@ -24,7 +24,7 @@ for (f in file_list)
 
 base_path<-paste0('/data-2/',f,'epigenomics.sdsc.edu/hjiao/bot_output/Neil_Chi_152161/counts/',f,'outs/')
 
-counts <- Read10X_h5(paste0(base_path,f,"filtered_feature_bc_matrix.h5"))
+counts <- Read10X_h5(paste0(base_path,"filtered_feature_bc_matrix.h5"))
 
 fragpath <- paste0(base_path,"atac_fragments.tsv.gz")
 
@@ -47,9 +47,9 @@ DefaultAssay(pbmc) <- "ATAC"
 pbmc <- NucleosomeSignal(pbmc)
 pbmc <- TSSEnrichment(pbmc)
 
-run_name<-substr(f,1,nchar(f))
+run_name<-substr(f,1,nchar(f)-1)
 
-pdf(paste0(results_dir,run_name,'.pdf')
+pdf(paste0(results_dir,run_name,'.pdf'))
 
 VlnPlot(
   object = pbmc,
@@ -82,6 +82,6 @@ pbmc[["peaks"]] <- CreateChromatinAssay(
   annotation = annotation
 )
 
-save.image(paste0(results_dir,run_name,'.Rdata')
+save.image(paste0(results_dir,run_name,'.Rdata'))
 
 }
