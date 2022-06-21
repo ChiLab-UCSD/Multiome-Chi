@@ -13,7 +13,7 @@ seqlevelsStyle(annotation) <- "UCSC"
 
 base_path<-'/data-2/'
 
-file_list<-read.table('~/multiome_dir.txt')$V1
+file_list<-read.table('~/multiome_dir_4.txt')$V1
 
 results_dir<-'/data/results/'
 

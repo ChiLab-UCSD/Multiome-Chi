@@ -1,0 +1,238 @@
+library(Signac)
+library(Seurat)
+library(EnsDb.Hsapiens.v86)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library('SeuratDisk')
+
+load('/data/results/unified/unified.Rdata')
+
+DefaultAssay(merged_obj) <- "RNA"
+merged_obj <- SCTransform(merged_obj)
+merged_obj <- RunPCA(merged_obj)
+merged_obj <- FindNeighbors(merged_obj)
+merged_obj <- FindClusters(merged_obj)
+merged_obj <- RunUMAP(merged_obj,dims=1:30)
+
+merged_obj[['rna_umap']]<- merged_obj[['umap']]
+
+merged_obj_markers <- FindAllMarkers(merged_obj, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+
+#day
+
+day<-rep(NA,length(unique(merged_obj@meta.data$dataset)))
+names(day)<-unique(merged_obj@meta.data$dataset)
+
+day[c('JB_728_1_2_JB_726_1_2','JB_729_1_2_JB_727_1_2')]<-'E14.5'
+day[c('JB_744_1_2_JB_741_1_2','JB_745_1_2_JB_742_1_2')]<-'E18.5'
+day[c('JB_746_1_2_JB_743_1_2','JB_642_1_2_JB_646_1_2','JB_644_2_JB_648_2')]<-'E10.5'
+day[c('JB_751_1_2_JB_747_1_2','JB_752_1_2_JB_748_1_2')]<-'E8.5'
+day[c('JB_753_1_2_JB_749_1_2','JB_754_1_2_JB_750_1_2')]<-'E9.5'
+day[c('JB_759_1_2_JB_755_1_2','JB_760_1_2_JB_756_1_2')]<-'E12.5'
+day[c('JB_761_1_2_JB_757_1_2','JB_762_1_2_JB_758_1_2')]<-'P1'
+day[c('JB_785_JB_787','JB_784_JB_786')]<-'E7.5'
+
+day_sample=rep(NA,length(merged_obj@meta.data$dataset))
+for (i in 1:length(merged_obj@meta.data$dataset))
+{
+	day_sample[i]<-day[merged_obj@meta.data$dataset[i]]
+}
+
+merged_obj@meta.data$day<-day_sample
+
+merged_obj@meta.data$RNA_cluster_default<-Idents(merged_obj)
+
+write.table(merged_obj_markers, file='/data/results/unified/markers_all_05202022.txt', quote=FALSE, sep='\t')
+
+#save.image('/data/results/unified/unified.Rdata')
+
+pdf('/data/results/unified/RNA_cluster_umap_05202022.pdf')
+DimPlot(merged_obj,label=TRUE)
+dev.off()
+
+pdf('/data/results/unified/RNA_day_umap_05202022.pdf')
+DimPlot(merged_obj,label=TRUE,group.by='day', reduction='umap')
+dev.off()
+
+pdf('/data/results/unified/sample_umap_05202022.pdf')
+DimPlot(merged_obj,label=TRUE,group.by='dataset', reduction='umap')
+dev.off()
+
+merged_obj[['rna_umap']]<- merged_obj[['umap']]
+merged_obj@meta.data$RNA_cluster_default<-Idents(merged_obj)
+
+day_table<-table(Idents(merged_obj), factor(merged_obj$day, levels=c('E8.5','E9.5','E10.5','E12.5','E14.5','E18.5','P1')))
+
+samples_table<-table(merged_obj@meta.data$RNA_cluster_default, merged_obj$dataset)
+
+write.table(day_table, file='/data/results/unified/day_table_0520202.tsv', sep='\t')
+write.table(samples_table, file='/data/results/unified/samples_table_0520202.tsv', sep='\t')
+write.table(clusters_table, file='/data/results/unified/clusters_table_0520202.tsv', sep='\t', col.names=NA)
+
+
+DefaultAssay(merged_obj) <- "ATAC"
+merged_obj <- RunTFIDF(merged_obj)
+merged_obj <- FindTopFeatures(merged_obj, min.cutoff = 'q0')
+merged_obj <- RunSVD(merged_obj)
+
+pdf('/data/results/unified/ATAC_depth_cor.pdf')
+DepthCor(merged_obj)
+dev.off()
+
+#component 1 highly correlated with depth
+
+merged_obj <- RunUMAP(object = merged_obj, reduction = 'lsi', dims = 2:30)
+merged_obj <- FindNeighbors(object = merged_obj, reduction = 'lsi', dims = 2:30)
+
+merged_obj[['atac_umap']]<- merged_obj[['umap']]
+
+#new clustering
+
+merged_obj <- FindClusters(object = merged_obj, verbose = FALSE, algorithm = 3)
+merged_obj@meta.data$ATAC_cluster_default<-Idents(merged_obj)
+
+pdf('/data/results/unified/ATAC_cluster_umap_05202022.pdf')
+DimPlot(object = merged_obj, label = TRUE) + NoLegend()
+dev.off()
+
+pdf('/data/results/unified/ATAC_cluster_umap_colored_by_RNA_clusters_05202022.pdf')
+DimPlot(object = merged_obj, label = TRUE, group.by='RNA_cluster_default') + NoLegend()
+dev.off()
+
+clusters_table<-table(merged_obj@meta.data$RNA_cluster_default,merged_obj@meta.data$ATAC_cluster_default)
+
+save.image('/data/results/unified/unified.Rdata')
+
+#joint clustering
+
+merged_obj<- FindMultiModalNeighbors(
+  object = merged_obj,
+  reduction.list = list("pca", "lsi"), 
+  dims.list = list(1:50, 2:40),
+  modality.weight.name = "modality.weight",
+  verbose = TRUE
+)
+
+merged_obj <- RunUMAP(
+  object = merged_obj,
+  nn.name = "weighted.nn",
+  verbose = TRUE
+)
+
+merged_obj[['combined_umap']]<-merged_obj[['umap']]
+
+#cluster according to merged wnn
+#merged_obj<-FindClusters(merged_obj,graph.name ="wsnn", algorithm = 3, resolution = 2)
+#merged_obj<-FindClusters(merged_obj,graph.name ="wsnn", algorithm = 3, resolution =0.2)
+merged_obj<-FindClusters(merged_obj,graph.name ="wsnn", algorithm = 3, resolution =0.1)
+
+pdf('/data/results/unified/joint_cluster_umap_05202022.pdf')
+DimPlot(object = merged_obj, label = TRUE) + NoLegend()
+dev.off()
+
+DefaultAssay(merged_obj)<-'RNA'
+merged_obj_markers_combined_01_rna <- FindAllMarkers(merged_obj, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+
+save.image('/data/results/unified/unified.Rdata')
+
+SaveH5Seurat(pbmc3k.final, filename = "/data/results/unified/unified.h5Seurat")
+Convert("unified.h5Seurat", dest = "h5ad")
+
+merged_loom$close_all()
+
+#memory probelms
+#DefaultAssay(merged_obj)<-'ATAC'
+#merged_obj_markers_combined_01_atac <- FindAllMarkers(merged_obj, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+
+#let's try the peaks around Mab21l2
+
+#recall peaks
+
+peaks<-CallPeaks(object = merged_obj, group.by ="RNA_cluster_default", macs2.path = '/home/ubuntu/miniconda3/envs/Signac/bin/macs2')
+
+peaks <- keepStandardChromosomes(peaks, pruning.mode = "coarse")
+peaks <- subsetByOverlaps(x = peaks, ranges = blacklist_hg38_unified, invert = TRUE)
+
+# quantify counts in each peak
+macs2_counts <- FeatureMatrix(
+  fragments = Fragments(merged_obj),
+  features = peaks,
+  cells = colnames(merged_obj)
+)
+
+DefaultAssay(merged_obj) <- "peaks"
+
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevelsStyle(annotation) <- "UCSC"
+
+# first compute the GC content for each peak
+merged_obj <- RegionStats(merged_obj, genome = BSgenome.Hsapiens.UCSC.hg38)
+
+# link peaks to genes
+merged_obj <- LinkPeaks(
+  object = merged_obj,
+  peak.assay = "peaks",
+  expression.assay = "SCT",
+  genes.use = c("MAB21L2")
+)
+
+library(stringr)
+
+marker_genes<-c('TNNT2', 'MYL7','TTN', 'NKX2-5', 'VWF', 'PECAM1', 'TBX18', 'WT1', 'TCF21', 'GATA1', 'RUNX1', 'TAL1', 'HBA-A1', 'HBA-A2', 'TAGLN', 'NPPA', 'NPPB', 'MYL2', 'HCN4', 'SHOX2', 'TBX5', 'TBX1', 'FGF10', 'FGF8', 'HAND1', 'HAND2', 'MYH7','MYH6', 'MYH11', 'HEY2', 'ISL1', 'TBX3', 'GATA4', 'PROX1', 'NLRP3', 'NFATC1',  'UPK3B')
+marker_genes<-str_to_title(marker_genes)
+marker_genes[13]<-'Hba-a1'
+marker_genes[14]<-'Hba-a2'
+DefaultAssay(merged_obj)<-'RNA'
+
+marker_genes %in% rownames(x = merged_obj)
+
+umap_loc<-'/data/results/unified/umaps/'
+
+Idents(merged_obj)<-merged_obj@meta.data$RNA_cluster_default
+
+raw_genes<-c('Isl1', 'Tbx5', 'Gata4', 'Hand1', 'Mab21l2', 'Tbx18', 'Tbx3', 'Wt1', 'Tcf21', 'Upk3b', 'Lum', 'Postn', 'Pdgfra', 'Col12a1',
+'Shox2', 'Hcn4', 'Myl7', 'Tnnt2', 'Myh6', 'Myh7', 'Ttn', 'Nkx2-5', 'Runx1', 'Gata1','Gata5', 'Mef2c', 'Hand2', 'Fgf10', 'Fgf8', 'Nppa',
+'Hoxb1', 'Twist1', 'Msx2', 'Bmp4', 'Bmp2', 'Wnt2', 'Wnt5a', 'Tbx2', 'Rspo3', 'Sfrp5', 'Lhx2', 'Afp', 'Foxa2', 'Foxc2', 'Foxc1', 'Myh11',
+'Tagln', 'Actn1', 'Ttr', 'Cdh1', 'Pecam1', 'Vwf', 'Egr1', 'Npr3', 'Tek', 'Flt1', 'Hba-a1', 'Hba-x', 'Cd68', 'Lyve1', 'Hey2', 'Cck', 'Sox2',
+'Nr2f2', 'Cdh5', 'Tnni3', 'Vsnl1', 'Stard10', 'Nr2f1', 'Cav1', 'Fxyd5', 'Itm2a', 'Loxl2','Sema3a','Sema3c', 'Dlx5', 'Dlx2', 'Otx2', 'Crabp2',
+'Fxyd5', 'Cxcl12', 'Tnc', 'Ptn', 'Pla2g7', 'Aldh1a2', 'Col1a2', 'Homer2', 'Pitx2', 'Nfatc1')
+
+Idents(merged_obj)<-merged_obj@meta.data$RNA_cluster_default
+
+for (g in raw_genes)
+{
+	jpeg(paste0(umap_loc,g,'.jpeg'))
+	print(FeaturePlot(merged_obj,reduction='rna_umap',features=g,label=TRUE,raster=FALSE,order=TRUE))
+	dev.off()
+}
+
+
+
+pdf('/data/results/unified/ATAC_cluster_umap_colored_by_sample_06082022.pdf')
+DimPlot(object = merged_obj, label = TRUE, group.by='dataset', reduction = 'atac_umap') + NoLegend()
+dev.off()
+
+pdf('/data/results/unified/ATAC_cluster_umap_colored_by_day_06082022.pdf')
+DimPlot(object = merged_obj, label = TRUE, group.by='day', reduction = 'atac_umap') + NoLegend()
+dev.off()
+
+pdf('/data/results/unified/ATAC_cluster_umap_06082022.pdf')
+DimPlot(object = merged_obj, label = TRUE, group.by='ATAC_cluster_default', reduction = 'atac_umap') + NoLegend()
+dev.off()
+
+pdf('/data/results/unified/combined_umap_colored_by_day_06082022.pdf')
+DimPlot(object = merged_obj, label = TRUE, group.by='day', reduction = 'combined_umap') + NoLegend()
+dev.off()
+
+pdf('/data/results/unified/combined_umap_colored_by_sample_06082022.pdf')
+DimPlot(object = merged_obj, label = TRUE, group.by='dataset', reduction = 'combined_umap') + NoLegend()
+dev.off()
+
+pdf('/data/results/unified/combined_umap_colored_by_RNA_cluster_06082022.pdf')
+DimPlot(object = merged_obj, label = TRUE, group.by='RNA_cluster_default', reduction = 'combined_umap') + NoLegend()
+dev.off()
+
+pdf('/data/results/unified/combined_umap_colored_by_combined_cluster_06082022.pdf')
+DimPlot(object = merged_obj, label = TRUE, group.by='wsnn_res.0.1', reduction = 'combined_umap') + NoLegend()
+dev.off()
+
+

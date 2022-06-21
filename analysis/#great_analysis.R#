@@ -1,0 +1,112 @@
+
+
+window_size=2e6
+
+promoter_genes<-unique(promoters$V4)
+prom_anno_genes<-as.character(de_up$V1)[which(as.character(de_up$V1) %in% promoter_genes)]
+
+distances<-vector("list",length(prom_anno_genes))
+names(distances)<-prom_anno_genes
+
+num_dif_ac_peaks<-rep(NA,length(prom_anno_genes))
+names(num_dif_ac_peaks)<-prom_anno_genes
+
+true_da<-da[which(da$FDR<0.05),]
+
+for (g in prom_anno_genes)
+{
+
+        gene_prom<-subset(promoters, V4==g)
+        min_coord<-min(gene_prom$V2)-window_size
+        max_coord<-max(gene_prom$V3)+window_size
+        dif_peaks<-subset(true_da,chr==gene_prom$V1[1] & start > min_coord & end < max_coord)
+        num_dif_ac_peaks[g]<-dim(dif_peaks)[1]
+
+        atac_centers<-rowMeans(matrix(c(dif_peaks$start,dif_peaks$end),ncol=2))
+        prom_center<-mean(min(gene_prom$V2),max(gene_prom$V3))
+        distances[g]<-list(floor(abs(atac_centers-prom_center)))
+
+}
+
+all_distances<-unlist(distances)
+
+all_distances[which(all_distances==max(all_distances))]
+
+false_da<-da[which(da$FDR>0.2),]
+
+for (g in prom_anno_genes)
+{
+
+        gene_prom<-subset(promoters, V4==g)
+        min_coord<-min(gene_prom$V2)-window_size
+        max_coord<-max(gene_prom$V3)+window_size
+        dif_peaks<-subset(false_da,chr==gene_prom$V1[1] & start > min_coord & end < max_coord)
+        num_dif_ac_peaks[g]<-dim(dif_peaks)[1]
+
+        atac_centers<-rowMeans(matrix(c(dif_peaks$start,dif_peaks$end),ncol=2))
+        prom_center<-mean(min(gene_prom$V2),max(gene_prom$V3))
+        distances[g]<-list(floor(abs(atac_centers-prom_center)))
+
+}
+
+background_distances<-unlist(distances)
+
+
+#test genomic ranges for GREAT analysis
+
+library("GenomicRanges")
+
+#construct GR object
+da_coords_true<-str_split_fixed(true_da$peak_ID,'_',n=3)
+da_coords_false<-str_split_fixed(false_da$peak_ID,'_',n=3)
+
+gr<-GRanges(seqnames=da_coords_true[,1], ranges=IRanges(as.numeric(da_coords_true[,2]),end=as.numeric(da_coords_true[,3]), names=true_da$peak_ID),score=true_da$logFC_HF.Ctl)
+bg<-GRanges(seqnames=da_coords[,1], ranges=IRanges(as.numeric(da_coords[,2]),end=as.numeric(da_coords[,3]), names=da$peak_ID),score=da$logFC_HF.Ctl)
+
+#submit to GREAT, default params
+job<-submitGreatJob(gr, bg=bg, species='hg38')
+tb = getEnrichmentTables(job)
+write.table(tb["GO Biological Process"],file='/Users/Dan/projects/CAREHF/cardiomyocyte_GO_BP_great.tsv', quote=FALSE, col.names=NA, sep='\t')
+
+write.table(tb2["GO Biological Process"],file='/Users/Dan/projects/CAREHF/cardiomyocyte_GO_BP_great_full.tsv', quote=FALSE, col.names=NA, sep='\t')
+
+tb_gene<-getEnrichmentTables(job,category="Genes")
+write.table(tb_gene["Ensembl Genes"],file='/Users/Dan/projects/CAREHF/cardiomyocyte_genes_great.tsv', quote=FALSE, col.names=NA, sep='\t')
+
+double_support_genes_up<-de_up$V1 %in% as.character(tb_gene["Ensembl Genes"][[1]]['name'][1:143,])
+double_support_genes_down<-de_down$V1[which(de_down$V1 %in% as.character(tb_gene["Ensembl Genes"][[1]]['name'][1:143,]))]
+
+
+
+library(motifmatchr)
+library("TFBSTools")
+
+motif_ix <- matchMotifs(example_motifs, gr, genome = "hg38")
+
+#heatmaps
+
+markers<-read.csv('/Users/Dan/projects/CAREHF/atac_markers.txt', header=FALSE)$V1
+atac_clusters<-read.csv('/Users/Dan/projects/CAREHF/atac_clusters.txt',sep='\t',header=FALSE)
+
+atac_clusters_hr<-atac_clusters$V2
+names(atac_clusters_hr)<-atac_clusters$V1
+
+atac_data<-read.csv('/Users/Dan/projects/CAREHF/gene_acc.tsv', sep='\t',row.names=1)
+
+for_heatmap<-atac_data[rev(markers),]
+colnames(for_heatmap)<-atac_clusters_hr[colnames(atac_data)]
+
+tiff('/Users/Dan/projects/CAREHF/atac_marker_heatmap.tiff')
+print(heatmap(data.matrix(for_heatmap), Rowv=NA, Colv=NA, margins=c(12,5)))
+dev.off()
+
+rna_data<-read.csv(paste0(db_path,'/Differential_Expression_010722/Input/RNA_countmatrix_JB_01032022.txt'),sep='\t',header=TRUE, row.names=1)
+
+markers_in_rna<-markers[which(markers %in% rownames(rna_data))]
+
+for_heatmap_2<-rna_data[rev(markers_in_rna),]
+tiff('/Users/Dan/projects/CAREHF/rna_pat_marker_heatmap.tiff')
+print(heatmap(data.matrix(for_heatmap_2), Rowv=NA, Colv=NA, margins=c(12,5)))
+dev.off()
+
+
